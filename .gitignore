@@ -1,0 +1,19 @@
+# Go build artifacts
+bin/
+build/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Module cache (should stay outside repo, but be explicit)
+pkg/
+
+# Editor / OS junk
+*.swp
+*.swo
+*.DS_Store
+.idea/
+.vscode/
