@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
+
+	"github.com/hellocripsis/gold-dust-go/internal/config"
 )
 
 type HealthResponse struct {
@@ -27,17 +28,14 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	addr := os.Getenv("GOLD_DUST_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:8080"
-	}
+	cfg := config.Load()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 
-	log.Printf("gold-dust-go gateway listening on http://%s", addr)
+	log.Printf("gold-dust-go gateway listening on http://%s", cfg.Server.Addr)
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(cfg.Server.Addr, mux); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
