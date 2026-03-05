@@ -1,6 +1,8 @@
 package krypton
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -102,5 +104,123 @@ func TestFetchUnknownModeFallsBackToStub(t *testing.T) {
 	}
 	if h.At.Before(start) {
 		t.Fatalf("expected timestamp At to be set after call start")
+	}
+}
+
+func TestFetchHTTPRejectsNon2xxStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"decision":"Keep"}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{
+		Server: config.ServerConfig{Addr: "127.0.0.1:8080"},
+		Krypton: config.KryptonConfig{
+			Mode:       config.KryptonModeHTTP,
+			URL:        srv.URL,
+			BinaryPath: "entropy_health",
+		},
+	}
+
+	if _, err := fetchHTTP(cfg); err == nil {
+		t.Fatalf("expected fetchHTTP to fail on non-2xx status")
+	}
+}
+
+func TestFetchHTTPRequiresValidExplicitDecision(t *testing.T) {
+	t.Run("missing decision is rejected", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"samples":123}`))
+		}))
+		defer srv.Close()
+
+		cfg := config.Config{
+			Server: config.ServerConfig{Addr: "127.0.0.1:8080"},
+			Krypton: config.KryptonConfig{
+				Mode:       config.KryptonModeHTTP,
+				URL:        srv.URL,
+				BinaryPath: "entropy_health",
+			},
+		}
+
+		if _, err := fetchHTTP(cfg); err == nil {
+			t.Fatalf("expected fetchHTTP to fail when decision is missing")
+		}
+	})
+
+	t.Run("invalid decision is rejected", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"decision":"UnknownDecision"}`))
+		}))
+		defer srv.Close()
+
+		cfg := config.Config{
+			Server: config.ServerConfig{Addr: "127.0.0.1:8080"},
+			Krypton: config.KryptonConfig{
+				Mode:       config.KryptonModeHTTP,
+				URL:        srv.URL,
+				BinaryPath: "entropy_health",
+			},
+		}
+
+		if _, err := fetchHTTP(cfg); err == nil {
+			t.Fatalf("expected fetchHTTP to fail when decision is invalid")
+		}
+	})
+}
+
+func TestFetchHTTPNestedPayloadParses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok","krypton":{"samples":99,"mean":0.51,"variance":0.004,"jitter":0.03,"decision":"Throttle"}}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{
+		Server: config.ServerConfig{Addr: "127.0.0.1:8080"},
+		Krypton: config.KryptonConfig{
+			Mode:       config.KryptonModeHTTP,
+			URL:        srv.URL,
+			BinaryPath: "entropy_health",
+		},
+	}
+
+	h, err := fetchHTTP(cfg)
+	if err != nil {
+		t.Fatalf("unexpected fetchHTTP error: %v", err)
+	}
+	if h.Decision != DecisionThrottle {
+		t.Fatalf("expected decision %q, got %q", DecisionThrottle, h.Decision)
+	}
+	if h.Samples != 99 {
+		t.Fatalf("expected samples 99, got %d", h.Samples)
+	}
+}
+
+func TestFetchHTTPModeFallsBackToStubOnStrictParseError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"samples":10}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{
+		Server: config.ServerConfig{Addr: "127.0.0.1:8080"},
+		Krypton: config.KryptonConfig{
+			Mode:       config.KryptonModeHTTP,
+			URL:        srv.URL,
+			BinaryPath: "entropy_health",
+		},
+	}
+
+	h := Fetch(cfg)
+	if h.Source != "stub:http" {
+		t.Fatalf("expected Fetch(http) to fall back to stub:http, got %q", h.Source)
+	}
+	if h.Decision != DecisionKeep {
+		t.Fatalf("expected stub decision %q, got %q", DecisionKeep, h.Decision)
 	}
 }

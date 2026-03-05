@@ -5,11 +5,13 @@
 `gold-dust-go` is a small Go HTTP gateway that exposes:
 
 * `GET /health` – returns a gateway status and a Krypton entropy snapshot.
+  * Other methods return `405 method not allowed`.
 * `POST /jobs` – accepts a job request and returns an **accepted / throttled / denied** decision.
 
 It is designed to sit in front of the Rust project [`krypton-entropy-core`](https://github.com/hellocripsis/krypton-entropy-core) and the Python boundary layer [`krypton-boundary-orchestrator`](https://github.com/hellocripsis/krypton-boundary-orchestrator).
 
-The gateway is **portfolio-safe** and uses only OS RNG–based entropy via Krypton’s public binary.
+When run in `binary` mode with a working `entropy_health` executable, the gateway consumes Krypton entropy snapshots sourced from OS RNG in `krypton-entropy-core`.
+If external fetch/parsing fails, it intentionally falls back to stub health so local development and service wiring can continue.
 
 ---
 
@@ -51,6 +53,8 @@ The gateway is configured via environment variables:
   * `none`   – no external Krypton calls, use stub health.
   * `http`   – call a remote HTTP endpoint (e.g. another gateway).
   * `binary` – execute the `entropy_health` binary directly.
+
+In `http` mode, the upstream endpoint must return a `2xx` response and include an explicit valid decision (`Keep`, `Throttle`, or `Kill`). If not, the gateway falls back to stub health.
 
 * `GOLD_DUST_KRYPTON_BIN` (when `mode=binary`):
 
@@ -164,11 +168,11 @@ Format and test:
 
 ```bash
 cd ~/dev/gold-dust-go
-go fmt ./...
+gofmt -w .
 go test ./...
 ```
 
-(At the moment tests are minimal; this repo is primarily a wiring example.)
+(Tests cover decision mapping plus core gateway/Krypton behavior; this repo remains primarily a wiring example.)
 
 Typical loop when iterating:
 

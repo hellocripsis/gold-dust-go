@@ -19,8 +19,14 @@ jobs:
         with:
           go-version: "1.18"
 
-      - name: Fmt
-        run: go fmt ./...
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
 
       - name: Vet
         run: go vet ./...

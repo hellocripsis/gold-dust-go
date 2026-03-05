@@ -3,6 +3,7 @@ package krypton
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os/exec"
@@ -74,13 +75,10 @@ func fromPayload(payload map[string]any, source string) Health {
 
 	decision := DecisionKeep
 	if v, ok := payload["decision"]; ok {
-		if s, ok := v.(string); ok {
-			switch s {
-			case "Keep", "Throttle", "Kill":
-				decision = Decision(s)
-			default:
-				log.Printf("[krypton] unknown decision %q, defaulting to Keep", s)
-			}
+		if parsed, ok := parseDecision(v); ok {
+			decision = parsed
+		} else {
+			log.Printf("[krypton] unknown decision %v, defaulting to Keep", v)
 		}
 	}
 
@@ -95,15 +93,49 @@ func fromPayload(payload map[string]any, source string) Health {
 	}
 }
 
+func parseDecision(v any) (Decision, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return "", false
+	}
+
+	switch s {
+	case string(DecisionKeep):
+		return DecisionKeep, true
+	case string(DecisionThrottle):
+		return DecisionThrottle, true
+	case string(DecisionKill):
+		return DecisionKill, true
+	default:
+		return "", false
+	}
+}
+
+func fromPayloadStrict(payload map[string]any, source string) (Health, error) {
+	v, ok := payload["decision"]
+	if !ok {
+		return Health{}, ErrBadJSONShape("missing required field: decision")
+	}
+
+	decision, ok := parseDecision(v)
+	if !ok {
+		return Health{}, ErrBadJSONShape("invalid decision value")
+	}
+
+	h := fromPayload(payload, source)
+	h.Decision = decision
+	return h, nil
+}
+
 // fetchHTTP calls an HTTP /health endpoint and parses JSON.
 //
 // Supported shapes:
 //
-// 1) Flat JSON:
-//    { "samples": ..., "mean": ..., "variance": ..., "jitter": ..., "decision": ... }
+//  1. Flat JSON:
+//     { "samples": ..., "mean": ..., "variance": ..., "jitter": ..., "decision": ... }
 //
-// 2) Nested JSON (this service or others):
-//    { "krypton": { "samples": ..., "mean": ..., "variance": ..., "jitter": ..., "decision": ... }, ... }
+//  2. Nested JSON (this service or others):
+//     { "krypton": { "samples": ..., "mean": ..., "variance": ..., "jitter": ..., "decision": ... }, ... }
 func fetchHTTP(cfg config.Config) (Health, error) {
 	client := &http.Client{
 		Timeout: 1 * time.Second,
@@ -114,6 +146,9 @@ func fetchHTTP(cfg config.Config) (Health, error) {
 		return Health{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return Health{}, fmt.Errorf("unexpected HTTP status from krypton endpoint: %s", resp.Status)
+	}
 
 	var payload any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -127,11 +162,11 @@ func fetchHTTP(cfg config.Config) (Health, error) {
 
 	if inner, ok := obj["krypton"]; ok {
 		if m, ok := inner.(map[string]any); ok {
-			return fromPayload(m, "http:"+cfg.Krypton.URL), nil
+			return fromPayloadStrict(m, "http:"+cfg.Krypton.URL)
 		}
 	}
 
-	return fromPayload(obj, "http:"+cfg.Krypton.URL), nil
+	return fromPayloadStrict(obj, "http:"+cfg.Krypton.URL)
 }
 
 // fetchBinary execs the entropy_health binary and parses JSON.

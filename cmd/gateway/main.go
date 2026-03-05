@@ -22,8 +22,23 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+func writeJSON(w http.ResponseWriter, status int, payload any) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func makeHealthHandler(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			if err := writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"}); err != nil {
+				log.Printf("error encoding health method error response: %v", err)
+			}
+			return
+		}
+
 		h := krypton.Fetch(cfg)
 
 		resp := HealthResponse{
@@ -34,10 +49,7 @@ func makeHealthHandler(cfg config.Config) http.HandlerFunc {
 			KryptonMode: cfg.Krypton.Mode,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(resp); err != nil {
+		if err := writeJSON(w, http.StatusOK, resp); err != nil {
 			log.Printf("error encoding health response: %v", err)
 		}
 	}
@@ -46,8 +58,9 @@ func makeHealthHandler(cfg config.Config) http.HandlerFunc {
 func makeJobsHandler(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "method not allowed"})
+			if err := writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"}); err != nil {
+				log.Printf("jobs: error encoding method error response: %v", err)
+			}
 			return
 		}
 
@@ -56,14 +69,16 @@ func makeJobsHandler(cfg config.Config) http.HandlerFunc {
 		var req jobs.JobRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			log.Printf("jobs: bad request body: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "invalid JSON body"})
+			if err := writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid JSON body"}); err != nil {
+				log.Printf("jobs: error encoding bad request response: %v", err)
+			}
 			return
 		}
 
 		if req.JobID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "job_id is required"})
+			if err := writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "job_id is required"}); err != nil {
+				log.Printf("jobs: error encoding validation response: %v", err)
+			}
 			return
 		}
 
@@ -77,10 +92,7 @@ func makeJobsHandler(cfg config.Config) http.HandlerFunc {
 			Krypton:  h,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(resp); err != nil {
+		if err := writeJSON(w, http.StatusOK, resp); err != nil {
 			log.Printf("jobs: error encoding response: %v", err)
 		}
 	}
