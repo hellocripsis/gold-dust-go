@@ -48,6 +48,11 @@ entropy_health (Rust) ──▶ gold-dust-go (Go HTTP /health, /jobs) ──▶ 
 
 The gateway is configured via environment variables:
 
+* `GOLD_DUST_ADDR` (optional):
+
+  * Listen address for the HTTP server (default `127.0.0.1:8080`).
+  * Examples: `127.0.0.1:8080` (loopback only), `0.0.0.0:8080` (all interfaces).
+
 * `GOLD_DUST_KRYPTON_MODE`:
 
   * `none`   – no external Krypton calls, use stub health.
@@ -169,7 +174,8 @@ Format and test:
 ```bash
 cd ~/dev/gold-dust-go
 gofmt -w .
-go test ./...
+go vet ./...
+go test -race ./...
 ```
 
 (Tests cover decision mapping plus core gateway/Krypton behavior; this repo remains primarily a wiring example.)

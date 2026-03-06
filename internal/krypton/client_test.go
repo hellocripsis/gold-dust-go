@@ -3,6 +3,7 @@ package krypton
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -198,6 +199,90 @@ func TestFetchHTTPNestedPayloadParses(t *testing.T) {
 	if h.Samples != 99 {
 		t.Fatalf("expected samples 99, got %d", h.Samples)
 	}
+}
+
+func TestFetchBinaryStrictParsing(t *testing.T) {
+	t.Run("missing decision is rejected", func(t *testing.T) {
+		// Write a tiny shell script that prints JSON without a decision field.
+		script := "#!/bin/sh\necho '{\"samples\":10}'\n"
+		f, err := os.CreateTemp(t.TempDir(), "fake-binary-*")
+		if err != nil {
+			t.Fatalf("could not create temp file: %v", err)
+		}
+		if _, err := f.WriteString(script); err != nil {
+			t.Fatalf("could not write script: %v", err)
+		}
+		if err := f.Chmod(0o755); err != nil {
+			t.Fatalf("could not chmod script: %v", err)
+		}
+		f.Close()
+
+		cfg := config.Config{
+			Server:  config.ServerConfig{Addr: "127.0.0.1:8080"},
+			Krypton: config.KryptonConfig{Mode: config.KryptonModeBinary, BinaryPath: f.Name()},
+		}
+
+		if _, err := fetchBinary(cfg); err == nil {
+			t.Fatalf("expected fetchBinary to fail when decision field is missing")
+		}
+	})
+
+	t.Run("invalid decision is rejected", func(t *testing.T) {
+		script := "#!/bin/sh\necho '{\"decision\":\"Bogus\"}'\n"
+		f, err := os.CreateTemp(t.TempDir(), "fake-binary-*")
+		if err != nil {
+			t.Fatalf("could not create temp file: %v", err)
+		}
+		if _, err := f.WriteString(script); err != nil {
+			t.Fatalf("could not write script: %v", err)
+		}
+		if err := f.Chmod(0o755); err != nil {
+			t.Fatalf("could not chmod script: %v", err)
+		}
+		f.Close()
+
+		cfg := config.Config{
+			Server:  config.ServerConfig{Addr: "127.0.0.1:8080"},
+			Krypton: config.KryptonConfig{Mode: config.KryptonModeBinary, BinaryPath: f.Name()},
+		}
+
+		if _, err := fetchBinary(cfg); err == nil {
+			t.Fatalf("expected fetchBinary to fail when decision is invalid")
+		}
+	})
+
+	t.Run("valid decision succeeds", func(t *testing.T) {
+		for _, dec := range []string{"Keep", "Throttle", "Kill"} {
+			dec := dec
+			t.Run(dec, func(t *testing.T) {
+				script := "#!/bin/sh\necho '{\"samples\":512,\"mean\":0.5,\"variance\":0.003,\"jitter\":0.05,\"decision\":\"" + dec + "\"}'\n"
+				f, err := os.CreateTemp(t.TempDir(), "fake-binary-*")
+				if err != nil {
+					t.Fatalf("could not create temp file: %v", err)
+				}
+				if _, err := f.WriteString(script); err != nil {
+					t.Fatalf("could not write script: %v", err)
+				}
+				if err := f.Chmod(0o755); err != nil {
+					t.Fatalf("could not chmod script: %v", err)
+				}
+				f.Close()
+
+				cfg := config.Config{
+					Server:  config.ServerConfig{Addr: "127.0.0.1:8080"},
+					Krypton: config.KryptonConfig{Mode: config.KryptonModeBinary, BinaryPath: f.Name()},
+				}
+
+				h, err := fetchBinary(cfg)
+				if err != nil {
+					t.Fatalf("unexpected fetchBinary error: %v", err)
+				}
+				if string(h.Decision) != dec {
+					t.Fatalf("expected decision %q, got %q", dec, h.Decision)
+				}
+			})
+		}
+	})
 }
 
 func TestFetchHTTPModeFallsBackToStubOnStrictParseError(t *testing.T) {

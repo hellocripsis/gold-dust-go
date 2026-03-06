@@ -2,6 +2,7 @@ package krypton
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -172,9 +173,13 @@ func fetchHTTP(cfg config.Config) (Health, error) {
 // fetchBinary execs the entropy_health binary and parses JSON.
 //
 // Assumes the binary prints either a single JSON object or a JSON line
-// with the expected fields.
+// with the expected fields. The binary is given a 2-second deadline to
+// match the HTTP client timeout; a hung binary returns an error.
 func fetchBinary(cfg config.Config) (Health, error) {
-	cmd := exec.Command(cfg.Krypton.BinaryPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cfg.Krypton.BinaryPath)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
@@ -202,7 +207,7 @@ func fetchBinary(cfg config.Config) (Health, error) {
 		return Health{}, ErrBadJSONShape("entropy_health output not an object")
 	}
 
-	return fromPayload(obj, "binary:"+cfg.Krypton.BinaryPath), nil
+	return fromPayloadStrict(obj, "binary:"+cfg.Krypton.BinaryPath)
 }
 
 // ErrBadJSONShape is a soft error for unexpected JSON structures.

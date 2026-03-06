@@ -10,6 +10,11 @@ import (
 	"github.com/hellocripsis/gold-dust-go/internal/config"
 )
 
+// oversizedBody returns a POST body larger than the 64KB limit.
+func oversizedBody() string {
+	return `{"job_id":"x","payload":{"data":"` + strings.Repeat("a", 64*1024+1) + `"}}`
+}
+
 func testConfig() config.Config {
 	return config.Config{
 		Server: config.ServerConfig{
@@ -43,6 +48,21 @@ func TestHealthRejectsNonGET(t *testing.T) {
 	}
 	if errResp.Error != "method not allowed" {
 		t.Fatalf("expected method-not-allowed error message, got %q", errResp.Error)
+	}
+}
+
+func TestJobsRejectsOversizedBody(t *testing.T) {
+	handler := makeJobsHandler(testConfig())
+	req := httptest.NewRequest(http.MethodPost, "/jobs", strings.NewReader(oversizedBody()))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d for oversized body, got %d", http.StatusBadRequest, rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("expected Content-Type application/json, got %q", got)
 	}
 }
 
